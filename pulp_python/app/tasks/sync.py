@@ -1,8 +1,7 @@
 import asyncio
 import logging
 from functools import partial
-from gettext import gettext as _
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from aiohttp import ClientError, ClientResponseError
 from bandersnatch.configuration import BandersnatchConfig
@@ -12,9 +11,9 @@ from lxml.etree import LxmlError
 from packaging.requirements import Requirement
 from pypi_attestations import Provenance
 from pypi_simple import IndexPage
-from rest_framework import serializers
 
 from pulpcore.plugin.download import HttpDownloader
+from pulpcore.plugin.exceptions import SyncError
 from pulpcore.plugin.models import Artifact, ProgressReport, Remote, Repository
 from pulpcore.plugin.stages import (
     DeclarativeArtifact,
@@ -23,6 +22,7 @@ from pulpcore.plugin.stages import (
     Stage,
 )
 
+from pulp_python.app.exceptions import UnsupportedProtocolError
 from pulp_python.app.models import (
     PackageProvenance,
     PythonPackageContent,
@@ -45,14 +45,14 @@ def sync(remote_pk, repository_pk, mirror):
         mirror (boolean): True for mirror mode, False for additive mode.
 
     Raises:
-        serializers: ValidationError
+        SyncError
 
     """
     remote = PythonRemote.objects.get(pk=remote_pk)
     repository = Repository.objects.get(pk=repository_pk)
 
     if not remote.url:
-        raise serializers.ValidationError(detail=_("A remote must have a url attribute to sync."))
+        raise SyncError("A remote must have a url attribute to sync.")
 
     first_stage = PythonBanderStage(remote)
     DeclarativeVersion(first_stage, repository, mirror).create()
@@ -115,7 +115,8 @@ class PythonBanderStage(Stage):
         url = self.remote.url.rstrip("/")
         downloader = self.remote.get_downloader(url=url)
         if not isinstance(downloader, HttpDownloader):
-            raise ValueError("Only HTTP(S) is supported for python syncing")
+            scheme = urlparse(url).scheme
+            raise UnsupportedProtocolError(scheme)
 
         async with Master(url, allow_non_https=True) as master:
             # Replace the session with the remote's downloader session

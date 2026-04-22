@@ -9,7 +9,8 @@ from django.db.utils import IntegrityError
 from drf_spectacular.utils import extend_schema_serializer
 from packaging.requirements import Requirement
 from packaging.version import InvalidVersion, Version
-from pydantic import TypeAdapter, ValidationError
+from pydantic import TypeAdapter
+from pydantic import ValidationError as PydanticValidationError
 from pypi_attestations import AttestationError
 from rest_framework import serializers
 
@@ -387,7 +388,7 @@ class PythonPackageContentSerializer(core_serializers.SingleArtifactContentUploa
                 attestations = TypeAdapter(list[Attestation]).validate_json(value)
             else:
                 attestations = TypeAdapter(list[Attestation]).validate_python(value)
-        except ValidationError as e:
+        except PydanticValidationError as e:
             raise serializers.ValidationError(_("Invalid attestations: {}").format(e))
         return attestations
 
@@ -654,7 +655,7 @@ class PackageProvenanceSerializer(core_serializers.NoArtifactContentUploadSerial
         try:
             provenance = Provenance.model_validate_json(data["file"].read())
             data["provenance"] = provenance.model_dump(mode="json")
-        except ValidationError as e:
+        except PydanticValidationError as e:
             raise serializers.ValidationError(
                 _("The uploaded provenance is not valid: {}").format(e)
             )

@@ -4,4 +4,4 @@
 * [Host Python Content](host.md)
 * [Vulnerability Report](vulnerability_report.md)
 * [Attestation Hosting](attestation.md)
-* [Package Blocklist](blocklist.md)
+* [Package Policies](package_policies.md)

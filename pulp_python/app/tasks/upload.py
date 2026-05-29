@@ -4,10 +4,13 @@ from datetime import datetime, timezone
 from django.contrib.sessions.models import Session
 from django.db import transaction
 from pydantic import TypeAdapter
+from pydantic import ValidationError as PydanticValidationError
+from pypi_attestations import AttestationError
 
 from pulpcore.plugin.models import Artifact, Content, ContentArtifact, CreatedResource
 from pulpcore.plugin.util import get_current_authenticated_user, get_domain, get_prn
 
+from pulp_python.app.exceptions import AttestationVerificationError, InvalidAttestationsError
 from pulp_python.app.models import PackageProvenance, PythonPackageContent, PythonRepository
 from pulp_python.app.provenance import (
     AnyPublisher,
@@ -123,13 +126,19 @@ def create_provenance(package, attestations, domain):
     Returns:
         the newly created PackageProvenance
     """
-    attestations = TypeAdapter(list[Attestation]).validate_python(attestations)
+    try:
+        attestations = TypeAdapter(list[Attestation]).validate_python(attestations)
+    except PydanticValidationError as e:
+        raise InvalidAttestationsError(str(e))
 
     user = get_current_authenticated_user()
     publisher = AnyPublisher(kind="Pulp User", prn=get_prn(user))
     att_bundle = AttestationBundle(publisher=publisher, attestations=attestations)
     provenance = Provenance(attestation_bundles=[att_bundle])
-    verify_provenance(package.filename, package.sha256, provenance)
+    try:
+        verify_provenance(package.filename, package.sha256, provenance)
+    except AttestationError as e:
+        raise AttestationVerificationError(str(e))
     provenance_json = provenance.model_dump(mode="json")
 
     prov_sha256 = PackageProvenance.calculate_sha256(provenance_json)

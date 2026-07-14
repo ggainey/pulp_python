@@ -1,3 +1,4 @@
+import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
 from itertools import chain
@@ -15,9 +16,11 @@ from django.http.response import (
     HttpResponseBadRequest,
     HttpResponseForbidden,
     HttpResponseNotFound,
-    StreamingHttpResponse,
 )
 from django.shortcuts import redirect
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import cache_control
+from django.views.decorators.http import condition
 from drf_spectacular.utils import extend_schema
 from dynaconf import settings
 from packaging.utils import canonicalize_name
@@ -31,6 +34,7 @@ from pulpcore.plugin.util import get_domain, get_url
 from pulpcore.plugin.viewsets import OperationPostponedResponse
 
 from pulp_python.app import tasks
+from pulp_python.app.cache import PythonApiCache, find_base_path_cached
 from pulp_python.app.models import (
     PackageProvenance,
     PythonDistribution,
@@ -63,6 +67,17 @@ BASE_API_URL = urljoin(settings.PYPI_API_HOSTNAME, settings.PYPI_PATH_PREFIX)
 
 PYPI_SIMPLE_V1_HTML = "application/vnd.pypi.simple.v1+html"
 PYPI_SIMPLE_V1_JSON = "application/vnd.pypi.simple.v1+json"
+
+
+def _etag_func(request, path, **kwargs):
+    """Compute unquoted ETag for the condition decorator. Returns None if no repo."""
+    try:
+        distro = PyPIMixin.get_distribution(path)
+        repo_ver = PyPIMixin.get_repository_version(distro)
+    except Http404:
+        return None
+    raw = f"{repo_ver.number}:{repo_ver.pulp_created.isoformat()}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
 class PyPISimpleHTMLRenderer(TemplateHTMLRenderer):
@@ -298,6 +313,9 @@ class SimpleView(PackageUploadMixin, ViewSet):
         )
 
     @extend_schema(summary="Get index simple page")
+    @method_decorator(cache_control(max_age=600, public=True))
+    @method_decorator(condition(etag_func=_etag_func))
+    @PythonApiCache(base_key=find_base_path_cached)
     def list(self, request, path):
         """Gets the simple api html page for the index."""
         repo_version, content = self.get_rvc()
@@ -316,9 +334,9 @@ class SimpleView(PackageUploadMixin, ViewSet):
             index_data = write_simple_index_json(names)
             return Response(index_data, headers=headers)
         else:
-            index_data = write_simple_index(names, streamed=True)
+            index_data = write_simple_index(names)
             kwargs = {"content_type": media_type, "headers": headers}
-            return StreamingHttpResponse(index_data, **kwargs)
+            return HttpResponse(index_data, **kwargs)
 
     def pull_through_package_simple(self, package, path, remote):
         """Gets the package's simple page from remote."""
@@ -355,6 +373,9 @@ class SimpleView(PackageUploadMixin, ViewSet):
         }
 
     @extend_schema(operation_id="pypi_simple_package_read", summary="Get package simple page")
+    @method_decorator(cache_control(max_age=600, public=True))
+    @method_decorator(condition(etag_func=_etag_func))
+    @PythonApiCache(base_key=find_base_path_cached)
     def retrieve(self, request, path, package):
         """Retrieves the simple api html/json page for a package."""
         repo_ver, content = self.get_rvc()

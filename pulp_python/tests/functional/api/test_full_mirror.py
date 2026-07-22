@@ -32,7 +32,7 @@ def test_pull_through_install(
     # Perform pull-through install
     host = urlsplit(distro.base_url).hostname
     url = f"{distro.base_url}simple/"
-    cmd = ("pip", "install", "--trusted-host", host, "-i", url, PACKAGE)
+    cmd = ("pip", "install", "--no-deps", "--trusted-host", host, "-i", url, PACKAGE)
     subprocess.run(cmd, check=True)
 
     stdout = subprocess.run(("pip", "list"), capture_output=True).stdout.decode("utf-8")
